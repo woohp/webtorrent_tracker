@@ -7,13 +7,19 @@
 # General application configuration
 use Mix.Config
 
+dispatch = [
+  {:_,
+   [
+     {"/", WebtorrentTrackerWeb.UserSocket, []},
+     {:_, Phoenix.Endpoint.Cowboy2Handler, {WebtorrentTrackerWeb.Endpoint, []}}
+   ]}
+]
+
 # Configures the endpoint
 config :webtorrent_tracker, WebtorrentTrackerWeb.Endpoint,
-  url: [host: "localhost"],
-  secret_key_base: "jpvO1i7zFbtIHDE1N9kgr/Z45h8eCI1MQwHHm9JfMMx5EIZNudYXwFByUBZiRiNZ",
-  render_errors: [],
+  http: [dispatch: dispatch],
   pubsub_server: WebtorrentTracker.PubSub,
-  live_view: [signing_salt: "j8J1EhxD"]
+  code_reloader: true
 
 # Configures Elixir's Logger
 config :logger, :console,

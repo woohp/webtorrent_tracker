@@ -13,9 +13,10 @@ defmodule WebtorrentTracker.Application do
       {Phoenix.PubSub, name: WebtorrentTracker.PubSub},
       # WebtorrentTrackerWeb.Presence,
       # Start the Endpoint (http/https)
-      WebtorrentTrackerWeb.Endpoint
+      WebtorrentTrackerWeb.Endpoint,
       # Start a worker by calling: WebtorrentTracker.Worker.start_link(arg)
       # {WebtorrentTracker.Worker, arg}
+      WebtorrentTrackerWeb.SwarmState
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
