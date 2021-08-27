@@ -1,4 +1,9 @@
 defmodule WebtorrentTrackerWeb.UserSocket do
+  if Code.ensure_loaded?(:cowboy_websocket) and
+       function_exported?(:cowboy_websocket, :behaviour_info, 1) do
+    @behaviour :cowboy_websocket
+  end
+
   def init(req, []) do
     {:cowboy_websocket, req, %{info_hashes: MapSet.new()}}
   end
