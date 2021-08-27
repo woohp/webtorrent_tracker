@@ -42,7 +42,6 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   def websocket_info(:disconnect, state) do
-    Phoenix.PubSub.unsubscribe(state.pubsub_server, state.peer_id)
     {:stop, state}
   end
 
@@ -74,18 +73,20 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   defp process_announce(message, state, complete \\ false) do
+    pubsub_server = state.pubsub_server
     info_hash = message["info_hash"]
     peer_id = message["peer_id"]
 
     state =
       if !Map.has_key?(state, :peer_id) do
-        if Registry.count_match(WebtorrentTracker.PubSub, peer_id, :_) == 1 do
-          Phoenix.PubSub.broadcast(state.pubsub_server, peer_id, :disconnect)
+        # if we have an old peer, then it means the peer has changed socket
+        # send a message to that connection to disconnect
+        if Registry.count_match(pubsub_server, peer_id, :_) == 1 do
+          Phoenix.PubSub.broadcast(pubsub_server, peer_id, :disconnect)
         end
 
-        Phoenix.PubSub.subscribe(state.pubsub_server, peer_id)
-
-        Phoenix.PubSub.subscribe(state.pubsub_server, info_hash, metadata: %{complete: complete})
+        Phoenix.PubSub.subscribe(pubsub_server, peer_id)
+        Phoenix.PubSub.subscribe(pubsub_server, info_hash, metadata: %{complete: complete})
 
         Map.put(state, :peer_id, peer_id)
       else
@@ -94,10 +95,11 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
     state = %{state | info_hashes: MapSet.put(state.info_hashes, info_hash)}
 
-    send_offers_to_peers(state.pubsub_server, message)
+    send_offers_to_peers(pubsub_server, message)
 
-    complete_count = Registry.count_match(state.pubsub_server, info_hash, %{complete: true})
-    num_peers = Registry.count_match(WebtorrentTracker.PubSub, info_hash, :_)
+    # these metrics can be wrong if we have disconnected an old peer, but it hasn't processed the terminate cmd yet
+    complete_count = Registry.count_match(pubsub_server, info_hash, %{complete: true})
+    num_peers = Registry.count_match(pubsub_server, info_hash, :_)
     incomplete_count = num_peers - complete_count
 
     reply = %{
@@ -128,7 +130,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     reply = %{reply | "peer_id" => state.peer_id}
 
     Phoenix.PubSub.broadcast(
-      WebtorrentTracker.PubSub,
+      state.pubsub_server,
       to_peer_id,
       Phoenix.json_library().encode!(reply)
     )
@@ -138,27 +140,15 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
   defp process_stop(message, state) do
     info_hash = message["info_hash"]
-    Phoenix.PubSub.unsubscribe(WebtorrentTracker.PubSub, info_hash)
+    Phoenix.PubSub.unsubscribe(state.pubsub_server, info_hash)
     state = %{state | info_hashes: MapSet.delete(state.info_hashes, info_hash)}
 
     {:noreply, state}
   end
 
-  def terminate(_reason, _req, state) do
-    disconnect_peer(state)
+  def terminate(_reason, _req, _state) do
+    # IO.puts("terminate!")
     :ok
-  end
-
-  defp disconnect_peer(state) do
-    Phoenix.PubSub.unsubscribe(WebtorrentTracker.PubSub, state.peer_id)
-
-    for info_hash <- state.info_hashes do
-      Phoenix.PubSub.unsubscribe(WebtorrentTracker.PubSub, info_hash)
-    end
-
-    state = %{state | info_hashes: MapSet.new()}
-
-    state
   end
 
   def dispatch(entries, from, %{
