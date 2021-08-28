@@ -19,17 +19,20 @@ defmodule WebtorrentTrackerWeb.ChannelCase do
 
   using do
     quote do
-      # Import conveniences for testing with channels
-      import Phoenix.ChannelTest
       import WebtorrentTrackerWeb.ChannelCase
-
-      # The default endpoint for testing
-      @endpoint WebtorrentTrackerWeb.Endpoint
     end
   end
 
   setup _tags do
     :ok
+  end
+
+  def json_encode!(message) do
+    Phoenix.json_library().encode!(message)
+  end
+
+  def json_decode!(body) do
+    Phoenix.json_library().decode!(body)
   end
 
   defmacro assert_receive_nothing(timeout \\ nil) do

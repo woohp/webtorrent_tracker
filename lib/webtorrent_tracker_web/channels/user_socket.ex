@@ -32,8 +32,8 @@ defmodule WebtorrentTrackerWeb.UserSocket do
       {:stop, _state} ->
         out
 
-      unrecognized_out ->
-        raise "unexpected output: #{inspect(unrecognized_out)}"
+      unrecognized_output ->
+        raise "unexpected output: #{inspect(unrecognized_output)}"
     end
   end
 
@@ -86,7 +86,8 @@ defmodule WebtorrentTrackerWeb.UserSocket do
         end
 
         Phoenix.PubSub.subscribe(pubsub_server, peer_id)
-        Phoenix.PubSub.subscribe(pubsub_server, info_hash, metadata: %{complete: complete})
+
+        Phoenix.PubSub.subscribe(pubsub_server, info_hash, metadata: %{complete: complete, peer_id: peer_id})
 
         Map.put(state, :peer_id, peer_id)
       else
@@ -95,7 +96,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
     state = %{state | info_hashes: MapSet.put(state.info_hashes, info_hash)}
 
-    send_offers_to_peers(pubsub_server, message)
+    send_offers_to_peers(pubsub_server, peer_id, message)
 
     # these metrics can be wrong if we have disconnected an old peer, but it hasn't processed the terminate cmd yet
     complete_count = Registry.count_match(pubsub_server, info_hash, %{complete: true})
@@ -113,16 +114,18 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     {:reply, reply, state}
   end
 
-  defp send_offers_to_peers(pubsub_server, message) do
+  defp send_offers_to_peers(pubsub_server, from, message) do
     if message["offers"] do
-      Phoenix.PubSub.broadcast_from!(
-        pubsub_server,
-        self(),
-        message["info_hash"],
-        message,
-        WebtorrentTrackerWeb.UserSocket
-      )
+      topic = message["info_hash"]
+      dispatcher = WebtorrentTrackerWeb.UserSocket
+      {:ok, {adapter, name}} = Registry.meta(pubsub_server, :pubsub)
+
+      with :ok <- adapter.broadcast(name, topic, message, dispatcher) do
+        Registry.dispatch(pubsub_server, topic, {dispatcher, :dispatch, [from, message]})
+      end
     end
+
+    :ok
   end
 
   defp process_answer(message, state) do
@@ -151,14 +154,18 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     :ok
   end
 
-  def dispatch(entries, from, %{
-        "info_hash" => info_hash,
-        "peer_id" => peer_id,
-        "offers" => offers
-      })
+  def dispatch(
+        entries,
+        from,
+        %{
+          "info_hash" => info_hash,
+          "peer_id" => peer_id,
+          "offers" => offers
+        } = _message
+      )
       when from != :none do
     pids =
-      for {pid, _} <- entries, pid != from do
+      for {pid, %{peer_id: peer_id}} <- entries, peer_id != from do
         pid
       end
 

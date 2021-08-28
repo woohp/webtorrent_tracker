@@ -21,8 +21,7 @@ config :webtorrent_tracker, WebtorrentTrackerWeb.Endpoint,
   pubsub_server: WebtorrentTracker.PubSub,
   code_reloader: true
 
-config :webtorrent_tracker, WebtorrentTrackerWeb.UserSocket,
-  pubsub_server: WebtorrentTracker.PubSub
+config :webtorrent_tracker, WebtorrentTrackerWeb.UserSocket, pubsub_server: WebtorrentTracker.PubSub
 
 # Configures Elixir's Logger
 config :logger, :console,
