@@ -1,14 +1,14 @@
-defmodule WebtorrentTrackerWeb.RoomChannelTest do
-  use WebtorrentTrackerWeb.ChannelCase
+defmodule WebtorrentTrackerWeb.UserSocketTest do
+  use WebtorrentTrackerWeb.SocketCase
   alias WebtorrentTrackerWeb.UserSocket
 
-  defp make_id(), do: Base.encode64(:rand.bytes(8))
+  defp make_id(), do: List.to_string(for <<codepoint <- :rand.bytes(20)>>, do: codepoint)
 
   defp make_offer() do
     %{
       "offer" => %{
         "type" => "offer",
-        "sdp" => "v=0\r\no=mozilla...THIS_IS_SDPARTA-91.0.1 1499069384319828683"
+        "sdp" => "v=0\r\no=mozilla...THIS_IS_SDPARTA-91.0.1 #{:rand.uniform(10_000_000_000_000_000_000)}"
       },
       "offer_id" => make_id()
     }
@@ -20,24 +20,20 @@ defmodule WebtorrentTrackerWeb.RoomChannelTest do
   end
 
   def send_message(message, state) do
-    UserSocket.websocket_handle({:text, json_encode!(message)}, state)
+    case UserSocket.websocket_handle({:text, json_encode!(message)}, state) do
+      {:reply, {:text, body}, state} -> {:reply, json_decode!(body), state}
+      other -> other
+    end
   end
 
-  setup do
-    %{state: create_state()}
-  end
-
-  test "gets info from server on join", %{state: state1} do
+  test "gets info from server on join" do
     info_hash = make_id()
-    peer1_id = "peer-1"
 
-    peer1_offers = [
-      make_offer(),
-      make_offer(),
-      make_offer()
-    ]
+    peer1_id = "peer-1______________"
+    peer1_offers = for _ <- 0..2, do: make_offer()
+    state1 = create_state()
 
-    {:reply, {:text, out_body}, state1} =
+    {:reply, reply, state1} =
       send_message(
         %{
           action: "announce",
@@ -57,21 +53,16 @@ defmodule WebtorrentTrackerWeb.RoomChannelTest do
              "interval" => 120,
              "complete" => 0,
              "incomplete" => 1
-           } = json_decode!(out_body)
+           } = reply
 
     assert_receive_nothing()
 
     # a new peer shows up!
-    peer2_id = "peer-2"
-
-    peer2_offers = [
-      make_offer(),
-      make_offer()
-    ]
-
+    peer2_id = "peer-2______________"
+    peer2_offers = for _ <- 0..1, do: make_offer()
     state2 = create_state()
 
-    {:reply, {:text, out_body}, _state2} =
+    {:reply, reply, _state2} =
       send_message(
         %{
           action: "announce",
@@ -92,23 +83,20 @@ defmodule WebtorrentTrackerWeb.RoomChannelTest do
              "complete" => 0,
              # 2 users now!
              "incomplete" => 2
-           } = json_decode!(out_body)
+           } = reply
 
     assert Registry.count_match(WebtorrentTracker.PubSub, info_hash, :_) == 2
 
-    %{
-      "action" => "announce",
-      "info_hash" => ^info_hash,
-      "peer_id" => ^peer2_id,
-      "offer" => %{
-        "sdp" => <<peer2_offer_sdp::binary>>,
-        "type" => "offer"
-      },
-      "offer_id" => <<peer2_offer_id::binary>>
-    } =
-      receive do
-        <<msg::binary>> -> json_decode!(msg)
-      end
+    assert %{
+             "action" => "announce",
+             "info_hash" => ^info_hash,
+             "peer_id" => ^peer2_id,
+             "offer" => %{
+               "sdp" => <<peer2_offer_sdp::binary>>,
+               "type" => "offer"
+             },
+             "offer_id" => <<peer2_offer_id::binary>>
+           } = receive_json()
 
     assert_receive_nothing()
 
@@ -132,19 +120,16 @@ defmodule WebtorrentTrackerWeb.RoomChannelTest do
       )
 
     # and peer2 should get the answer from peer1
-    %{
-      "action" => "announce",
-      "info_hash" => ^info_hash,
-      "peer_id" => ^peer1_id,
-      "offer_id" => ^peer2_offer_id,
-      "answer" => %{
-        "type" => "answer",
-        "sdp" => ^peer2_offer_sdp
-      }
-    } =
-      receive do
-        <<msg::binary>> -> json_decode!(msg)
-      end
+    assert %{
+             "action" => "announce",
+             "info_hash" => ^info_hash,
+             "peer_id" => ^peer1_id,
+             "offer_id" => ^peer2_offer_id,
+             "answer" => %{
+               "type" => "answer",
+               "sdp" => ^peer2_offer_sdp
+             }
+           } = receive_json()
 
     # end of exchange
     assert_receive_nothing()

@@ -9,31 +9,28 @@ defmodule WebtorrentTrackerWeb.UserSocket do
       Application.get_env(:webtorrent_tracker, WebtorrentTrackerWeb.UserSocket)
       |> Keyword.fetch!(:pubsub_server)
 
-    {:cowboy_websocket, req, %{info_hashes: MapSet.new(), pubsub_server: pubsub_server}}
+    {:cowboy_websocket, req, %{pubsub_server: pubsub_server}}
   end
 
   def websocket_handle({opcode, body}, state) when opcode in [:text, :binary] do
-    body = Phoenix.json_library().decode!(body)
+    with {:ok, %{} = body} <- Phoenix.json_library().decode(body),
+         20 <- length(String.to_charlist(body["info_hash"])),
+         20 <- length(String.to_charlist(body["peer_id"])) do
+      case out = handle(body, state) do
+        {:noreply, state} ->
+          {:ok, state}
 
-    out =
-      try do
-        handle(body, state)
-      rescue
-        FunctionClauseError -> {:stop, state}
+        {:reply, reply, state} ->
+          {:reply, {:text, Phoenix.json_library().encode!(reply)}, state}
+
+        {:stop, _state} ->
+          out
+
+        unrecognized_output ->
+          raise "unexpected output: #{inspect(unrecognized_output)}"
       end
-
-    case out do
-      {:noreply, state} ->
-        {:ok, state}
-
-      {:reply, reply, state} ->
-        {:reply, {:text, Phoenix.json_library().encode!(reply)}, state}
-
-      {:stop, _state} ->
-        out
-
-      unrecognized_output ->
-        raise "unexpected output: #{inspect(unrecognized_output)}"
+    else
+      _ -> {:stop, state}
     end
   end
 
@@ -45,7 +42,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     {:stop, state}
   end
 
-  defp handle(%{"action" => "announce", "info_hash" => <<_::binary>>} = message, state) do
+  defp handle(%{"action" => "announce"} = message, state) do
     case message["event"] do
       nil ->
         if is_nil(message["answer"]) do
@@ -72,6 +69,10 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     {:noreply, state}
   end
 
+  defp handle(_message, state) do
+    {:stop, state}
+  end
+
   defp process_announce(message, state, complete \\ false) do
     pubsub_server = state.pubsub_server
     info_hash = message["info_hash"]
@@ -93,8 +94,6 @@ defmodule WebtorrentTrackerWeb.UserSocket do
       else
         state
       end
-
-    state = %{state | info_hashes: MapSet.put(state.info_hashes, info_hash)}
 
     send_offers_to_peers(pubsub_server, peer_id, message)
 
@@ -144,7 +143,6 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   defp process_stop(message, state) do
     info_hash = message["info_hash"]
     Phoenix.PubSub.unsubscribe(state.pubsub_server, info_hash)
-    state = %{state | info_hashes: MapSet.delete(state.info_hashes, info_hash)}
 
     {:noreply, state}
   end

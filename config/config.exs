@@ -18,8 +18,7 @@ dispatch = [
 # Configures the endpoint
 config :webtorrent_tracker, WebtorrentTrackerWeb.Endpoint,
   http: [dispatch: dispatch],
-  pubsub_server: WebtorrentTracker.PubSub,
-  code_reloader: true
+  pubsub_server: WebtorrentTracker.PubSub
 
 config :webtorrent_tracker, WebtorrentTrackerWeb.UserSocket, pubsub_server: WebtorrentTracker.PubSub
 
