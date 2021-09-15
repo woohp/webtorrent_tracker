@@ -26,7 +26,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     end
   end
 
-  test "gets info from server on join" do
+  test "two users join server" do
     info_hash = make_id()
 
     peer1_id = "peer-1______________"
@@ -133,5 +133,62 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
 
     # end of exchange
     assert_receive_nothing()
+
+    # try scraping
+    state3 = create_state()
+    {:reply, reply, _state3} = send_message(%{"action" => "scrape"}, state3)
+
+    assert %{
+             "action" => "scrape",
+             "files" => %{
+               ^info_hash => %{
+                 "complete" => 0,
+                 "incomplete" => 2,
+                 "downloaded" => 0
+               }
+             }
+           } = reply
+
+    # if we scrape a non-existant info_hash, we should get all zeros
+    info_hash_2 = make_id()
+    {:reply, reply, _state3} = send_message(%{"action" => "scrape", "info_hash" => info_hash_2}, state3)
+
+    assert %{
+             "action" => "scrape",
+             "files" => %{
+               ^info_hash_2 => %{
+                 "complete" => 0,
+                 "incomplete" => 0,
+                 "downloaded" => 0
+               }
+             }
+           } = reply
+
+    # finally, info_hash can be a list of hashes
+    info_hash_3 = make_id()
+
+    {:reply, reply, _state3} =
+      send_message(%{"action" => "scrape", "info_hash" => [info_hash, info_hash_2, info_hash_3]}, state3)
+
+    assert %{
+             "action" => "scrape",
+             "files" => %{
+               ^info_hash => %{
+                 "complete" => 0,
+                 "incomplete" => 2,
+                 "downloaded" => 0
+               },
+               ^info_hash_2 => %{
+                 "complete" => 0,
+                 "incomplete" => 0,
+                 "downloaded" => 0
+               },
+               ^info_hash_3 => %{
+                 "complete" => 0,
+                 "incomplete" => 0,
+                 "downloaded" => 0
+               }
+             }
+           } = reply
   end
 end

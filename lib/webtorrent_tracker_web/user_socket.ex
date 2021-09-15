@@ -13,9 +13,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   def websocket_handle({opcode, body}, state) when opcode in [:text, :binary] do
-    with {:ok, %{} = body} <- Phoenix.json_library().decode(body),
-         20 <- length(String.to_charlist(body["info_hash"])),
-         20 <- length(String.to_charlist(body["peer_id"])) do
+    with {:ok, %{} = body} <- Phoenix.json_library().decode(body) do
       case out = handle(body, state) do
         {:noreply, state} ->
           {:ok, state}
@@ -43,37 +41,75 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   defp handle(%{"action" => "announce"} = message, state) do
-    case message["event"] do
-      nil ->
-        if is_nil(message["answer"]) do
+    with 20 <- length(String.to_charlist(message["info_hash"])),
+         20 <- length(String.to_charlist(message["peer_id"])) do
+      case message["event"] do
+        nil ->
+          if is_nil(message["answer"]) do
+            process_announce(message, state)
+          else
+            process_answer(message, state)
+          end
+
+        "started" ->
           process_announce(message, state)
-        else
-          process_answer(message, state)
-        end
 
-      "started" ->
-        process_announce(message, state)
+        "stopped" ->
+          process_stop(message, state)
 
-      "stopped" ->
-        process_stop(message, state)
+        "completed" ->
+          process_announce(message, state, 1)
 
-      "completed" ->
-        process_announce(message, state, true)
-
-      _ ->
-        {:stop, state}
+        _ ->
+          {:stop, state}
+      end
+    else
+      _ -> {:stop, state}
     end
   end
 
-  defp handle(%{"action" => "scrape"} = _message, state) do
-    {:noreply, state}
+  defp handle(%{"action" => "scrape"} = message, %{pubsub_server: pubsub_server} = state) do
+    files =
+      if info_hash = message["info_hash"] do
+        info_hashes =
+          if is_binary(info_hash) do
+            [info_hash]
+          else
+            info_hash
+          end
+
+        for info_hash <- info_hashes, into: %{} do
+          complete_count = Registry.count_match(pubsub_server, info_hash, %{complete: 1})
+          num_peers = Registry.count_match(pubsub_server, info_hash, :_)
+          incomplete_count = num_peers - complete_count
+
+          {info_hash, %{complete: complete_count, incomplete: incomplete_count, downloaded: complete_count}}
+        end
+      else
+        # if we aren't given the info_hash(es), then just query everything and aggregate manually
+        Registry.select(pubsub_server, [{{:"$1", :_, %{complete: :"$2"}}, [], [{{:"$1", :"$2"}}]}])
+        |> Enum.group_by(fn {info_hash, _} -> info_hash end, fn {_, complete} -> complete end)
+        |> Enum.into(%{}, fn {info_hash, completes} ->
+          complete_count = Enum.sum(completes)
+          total_count = length(completes)
+
+          {info_hash,
+           %{
+             complete: complete_count,
+             incomplete: total_count - complete_count,
+             downloaded: complete_count
+           }}
+        end)
+      end
+
+    {:reply, %{"action" => "scrape", "files" => files}, state}
   end
 
   defp handle(_message, state) do
     {:stop, state}
   end
 
-  defp process_announce(message, state, complete \\ false) do
+  defp process_announce(message, state, complete \\ 0) do
     pubsub_server = state.pubsub_server
     info_hash = message["info_hash"]
     peer_id = message["peer_id"]
@@ -98,7 +134,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     send_offers_to_peers(pubsub_server, peer_id, message)
 
     # these metrics can be wrong if we have disconnected an old peer, but it hasn't processed the terminate cmd yet
-    complete_count = Registry.count_match(pubsub_server, info_hash, %{complete: true})
+    complete_count = Registry.count_match(pubsub_server, info_hash, %{complete: 1})
     num_peers = Registry.count_match(pubsub_server, info_hash, :_)
     incomplete_count = num_peers - complete_count
 
