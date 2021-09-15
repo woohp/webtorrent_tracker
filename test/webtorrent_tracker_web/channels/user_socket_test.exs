@@ -14,23 +14,42 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     }
   end
 
-  def create_state() do
+  defp create_state() do
     {:cowboy_websocket, nil, state} = UserSocket.init(nil, [])
     state
   end
 
-  def send_message(message, state) do
+  defp send_message(message, state) do
     case UserSocket.websocket_handle({:text, json_encode!(message)}, state) do
       {:reply, {:text, body}, state} -> {:reply, json_decode!(body), state}
       other -> other
     end
   end
 
+  defp new_peer(peer_idx, info_hash, opts \\ %{}) do
+    peer_id = "peer-#{peer_idx}______________"
+    peer_offers = for _ <- 0..2, do: make_offer()
+    state = create_state()
+
+    msg = %{
+      action: "announce",
+      info_hash: info_hash,
+      peer_id: peer_id,
+      numwant: 5,
+      downloaded: 0,
+      uploaded: 0,
+      offers: peer_offers
+    }
+
+    msg = Map.merge(msg, opts)
+    {:reply, reply, state} = send_message(msg, state)
+    {:ok, {peer_id, reply, state}}
+  end
+
   test "two users join server" do
     info_hash = make_id()
 
     peer1_id = "peer-1______________"
-    peer1_offers = for _ <- 0..2, do: make_offer()
     state1 = create_state()
 
     {:reply, reply, state1} =
@@ -42,7 +61,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
           numwant: 5,
           downloaded: 0,
           uploaded: 0,
-          offers: peer1_offers
+          offers: for(_ <- 0..2, do: make_offer())
         },
         state1
       )
@@ -190,5 +209,50 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
                }
              }
            } = reply
+  end
+
+  test "completed peers" do
+    info_hash = make_id()
+    {:ok, {_peer1_id, reply1, _state1}} = new_peer(1, info_hash, %{"event" => "completed"})
+    {:ok, {_peer2_id, reply2, _state2}} = new_peer(2, info_hash, %{"event" => "started"})
+    {:ok, {_peer3_id, reply3, _state3}} = new_peer(3, info_hash)
+    {:ok, {_peer4_id, reply4, _state4}} = new_peer(4, info_hash, %{"event" => "completed"})
+
+    assert %{"complete" => 1, "incomplete" => 0} = reply1
+    assert %{"complete" => 1, "incomplete" => 1} = reply2
+    assert %{"complete" => 1, "incomplete" => 2} = reply3
+    assert %{"complete" => 2, "incomplete" => 2} = reply4
+
+    # a scrape should reveal the current state
+    state5 = create_state()
+    {:reply, scrape_reply, _state5} = send_message(%{"action" => "scrape"}, state5)
+
+    assert %{
+             "action" => "scrape",
+             "files" => %{
+               ^info_hash => %{
+                 "complete" => 2,
+                 "incomplete" => 2,
+                 "downloaded" => 2
+               }
+             }
+           } = scrape_reply
+  end
+
+  test "client stopping" do
+    info_hash = make_id()
+    {:ok, {peer1_id, reply1, state1}} = new_peer(1, info_hash, %{"event" => "completed"})
+    assert %{"complete" => 1, "incomplete" => 0} = reply1
+
+    # if a peer stops, it should unsubscribe from the channel
+    send_message(
+      %{"action" => "announce", "info_hash" => info_hash, "peer_id" => peer1_id, "event" => "stopped"},
+      state1
+    )
+
+    state2 = create_state()
+    {:reply, scrape_reply, _state} = send_message(%{"action" => "scrape"}, state2)
+
+    assert %{"files" => %{}} = scrape_reply
   end
 end

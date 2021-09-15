@@ -177,8 +177,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   defp process_stop(message, state) do
-    info_hash = message["info_hash"]
-    Phoenix.PubSub.unsubscribe(state.pubsub_server, info_hash)
+    Phoenix.PubSub.unsubscribe(state.pubsub_server, message["info_hash"])
 
     {:noreply, state}
   end
