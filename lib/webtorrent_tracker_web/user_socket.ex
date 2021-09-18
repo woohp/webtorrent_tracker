@@ -123,13 +123,13 @@ defmodule WebtorrentTrackerWeb.UserSocket do
         end
 
         Phoenix.PubSub.subscribe(pubsub_server, peer_id)
-
-        Phoenix.PubSub.subscribe(pubsub_server, info_hash, metadata: %{complete: complete, peer_id: peer_id})
-
         Map.put(state, :peer_id, peer_id)
       else
         state
       end
+
+    Registry.unregister_match(pubsub_server, info_hash, %{peer_id: peer_id})
+    Phoenix.PubSub.subscribe(pubsub_server, info_hash, metadata: %{complete: complete, peer_id: peer_id})
 
     send_offers_to_peers(pubsub_server, peer_id, message)
 

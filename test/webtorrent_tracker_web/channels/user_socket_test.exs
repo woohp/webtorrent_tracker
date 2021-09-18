@@ -46,6 +46,14 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     {:ok, {peer_id, reply, state}}
   end
 
+  defp scrape(info_hash \\ nil) do
+    state = create_state()
+    msg = %{"action" => "scrape"}
+    msg = if is_nil(info_hash), do: msg, else: Map.put(msg, :info_hash, info_hash)
+    {:reply, %{"action" => "scrape", "files" => files}, _state} = send_message(msg, state)
+    files
+  end
+
   test "two users join server" do
     info_hash = make_id()
 
@@ -224,19 +232,27 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     assert %{"complete" => 2, "incomplete" => 2} = reply4
 
     # a scrape should reveal the current state
-    state5 = create_state()
-    {:reply, scrape_reply, _state5} = send_message(%{"action" => "scrape"}, state5)
-
     assert %{
-             "action" => "scrape",
-             "files" => %{
-               ^info_hash => %{
-                 "complete" => 2,
-                 "incomplete" => 2,
-                 "downloaded" => 2
-               }
+             ^info_hash => %{
+               "complete" => 2,
+               "incomplete" => 2,
+               "downloaded" => 2
              }
-           } = scrape_reply
+           } = scrape()
+  end
+
+  test "client starts and then completes" do
+    info_hash = make_id()
+    {:ok, {_peer1_id, _reply1, _state1}} = new_peer(1, info_hash, %{"event" => "completed"})
+    {:ok, {peer2_id, _reply2, state2}} = new_peer(2, info_hash, %{"event" => "started"})
+    {:ok, {_peer3_id, _reply3, _state3}} = new_peer(3, info_hash)
+
+    # 1 complete, 2 incomplete
+    assert %{^info_hash => %{"complete" => 1, "incomplete" => 2}} = scrape()
+
+    # peer2 announces complete
+    send_message(%{action: "announce", event: "completed", info_hash: info_hash, peer_id: peer2_id}, state2)
+    assert %{^info_hash => %{"complete" => 2, "incomplete" => 1}} = scrape()
   end
 
   test "client stopping" do
@@ -250,9 +266,6 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
       state1
     )
 
-    state2 = create_state()
-    {:reply, scrape_reply, _state} = send_message(%{"action" => "scrape"}, state2)
-
-    assert %{"files" => %{}} = scrape_reply
+    assert map_size(scrape()) == 0
   end
 end
