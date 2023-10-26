@@ -1,4 +1,6 @@
 defmodule WebtorrentTrackerWeb.UserSocket do
+  @announce_interval 120
+
   if Code.ensure_loaded?(:cowboy_websocket) and
        function_exported?(:cowboy_websocket, :behaviour_info, 1) do
     @behaviour :cowboy_websocket
@@ -140,7 +142,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
     reply = %{
       action: "announce",
-      interval: 120,
+      interval: @announce_interval,
       info_hash: info_hash,
       complete: complete_count,
       incomplete: incomplete_count
