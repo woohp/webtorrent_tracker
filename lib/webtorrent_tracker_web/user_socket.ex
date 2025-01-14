@@ -25,9 +25,6 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
         {:stop, _state} ->
           out
-
-        unrecognized_output ->
-          raise "unexpected output: #{inspect(unrecognized_output)}"
       end
     else
       _ -> {:stop, state}
