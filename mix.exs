@@ -5,7 +5,7 @@ defmodule WebtorrentTracker.MixProject do
     [
       app: :webtorrent_tracker,
       version: "0.1.0",
-      elixir: "~> 1.15",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -33,10 +33,9 @@ defmodule WebtorrentTracker.MixProject do
   defp deps do
     [
       {:phoenix, "~> 1.7.0"},
-      {:telemetry_metrics, "~> 0.6"},
-      {:telemetry_poller, "~> 1.0"},
-      {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.6"}
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_poller, "~> 1.1"},
+      {:plug_cowboy, "~> 2.7"}
     ]
   end
 
