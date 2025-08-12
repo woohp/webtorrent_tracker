@@ -11,7 +11,7 @@ dispatch = [
   {:_,
    [
      {"/", WebtorrentTrackerWeb.UserSocket, []},
-     {:_, Phoenix.Endpoint.Cowboy2Handler, {WebtorrentTrackerWeb.Endpoint, []}}
+     {:_, Bandit.PhoenixAdapter, {WebtorrentTrackerWeb.Endpoint, []}}
    ]}
 ]
 
