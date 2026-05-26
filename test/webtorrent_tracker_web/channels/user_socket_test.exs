@@ -15,13 +15,13 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
   end
 
   defp create_state() do
-    {:cowboy_websocket, nil, state} = UserSocket.init(nil, [])
+    {:ok, state} = UserSocket.init([])
     state
   end
 
   defp send_message(message, state) do
-    case UserSocket.websocket_handle({:text, json_encode!(message)}, state) do
-      {:reply, {:text, body}, state} -> {:reply, json_decode!(body), state}
+    case UserSocket.handle_in({json_encode!(message), [opcode: :text]}, state) do
+      {:push, {:text, body}, state} -> {:reply, json_decode!(body), state}
       other -> other
     end
   end

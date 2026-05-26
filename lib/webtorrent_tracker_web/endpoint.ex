@@ -3,6 +3,8 @@ defmodule WebtorrentTrackerWeb.Endpoint do
 
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  plug WebtorrentTrackerWeb.UserSocketPlug
+
   plug Plug.MethodOverride
   plug Plug.Head
   plug WebtorrentTrackerWeb.Router

@@ -1,42 +1,43 @@
 defmodule WebtorrentTrackerWeb.UserSocket do
   @announce_interval 120
 
-  if Code.ensure_loaded?(:cowboy_websocket) and
-       function_exported?(:cowboy_websocket, :behaviour_info, 1) do
-    @behaviour :cowboy_websocket
-  end
+  @behaviour WebSock
 
-  def init(req, []) do
+  @impl WebSock
+  def init([]) do
     pubsub_server =
       Application.get_env(:webtorrent_tracker, WebtorrentTrackerWeb.UserSocket)
       |> Keyword.fetch!(:pubsub_server)
 
-    {:cowboy_websocket, req, %{pubsub_server: pubsub_server}}
+    {:ok, %{pubsub_server: pubsub_server}}
   end
 
-  def websocket_handle({opcode, body}, state) when opcode in [:text, :binary] do
+
+  @impl WebSock
+  def handle_in({body, [opcode: opcode]}, state) when opcode in [:text, :binary] do
     with {:ok, %{} = body} <- Phoenix.json_library().decode(body) do
-      case out = handle(body, state) do
+      case handle(body, state) do
         {:noreply, state} ->
           {:ok, state}
 
         {:reply, reply, state} ->
-          {:reply, {:text, Phoenix.json_library().encode!(reply)}, state}
+          {:push, {:text, Phoenix.json_library().encode!(reply)}, state}
 
-        {:stop, _state} ->
-          out
+        {:stop, state} ->
+          {:stop, :normal, state}
       end
     else
-      _ -> {:stop, state}
+      _ -> {:stop, :normal, state}
     end
   end
 
-  def websocket_info(info, state) when is_binary(info) do
-    {:reply, {:text, info}, state}
+  @impl WebSock
+  def handle_info(info, state) when is_binary(info) do
+    {:push, {:text, info}, state}
   end
 
-  def websocket_info(:disconnect, state) do
-    {:stop, state}
+  def handle_info(:disconnect, state) do
+    {:stop, :normal, state}
   end
 
   defp handle(%{"action" => "announce"} = message, state) do
@@ -181,10 +182,11 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     {:noreply, state}
   end
 
-  def terminate(_reason, _req, _state) do
-    # IO.puts("terminate!")
+  @impl WebSock
+  def terminate(_reason, _state) do
     :ok
   end
+
 
   def dispatch(
         entries,

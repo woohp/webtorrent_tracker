@@ -7,17 +7,9 @@
 # General application configuration
 import Config
 
-dispatch = [
-  {:_,
-   [
-     {"/", WebtorrentTrackerWeb.UserSocket, []},
-     {:_, Bandit.PhoenixAdapter, {WebtorrentTrackerWeb.Endpoint, []}}
-   ]}
-]
-
 # Configures the endpoint
 config :webtorrent_tracker, WebtorrentTrackerWeb.Endpoint,
-  http: [dispatch: dispatch],
+  adapter: Bandit.PhoenixAdapter,
   pubsub_server: WebtorrentTracker.PubSub
 
 config :webtorrent_tracker, WebtorrentTrackerWeb.UserSocket, pubsub_server: WebtorrentTracker.PubSub
