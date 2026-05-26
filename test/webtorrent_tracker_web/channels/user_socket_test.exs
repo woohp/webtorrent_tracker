@@ -2,7 +2,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
   use WebtorrentTrackerWeb.SocketCase
   alias WebtorrentTrackerWeb.UserSocket
 
-  defp make_id(), do: List.to_string(for <<codepoint <- :rand.bytes(20)>>, do: codepoint)
+  defp make_id(), do: List.to_string(for _ <- 1..20, do: Enum.random(?a..?z))
 
   defp make_offer() do
     %{
@@ -52,6 +52,22 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     msg = if is_nil(info_hash), do: msg, else: Map.put(msg, :info_hash, info_hash)
     {:reply, %{"action" => "scrape", "files" => files}, _state} = send_message(msg, state)
     files
+  end
+
+  defp assert_stops(message) do
+    assert {:stop, :normal, _state} = UserSocket.handle_in({json_encode!(message), [opcode: :text]}, create_state())
+  end
+
+  test "rejects malformed messages" do
+    valid_id = make_id()
+    unicode_id = String.duplicate("é", 20)
+
+    assert {:stop, :normal, _state} = UserSocket.handle_in({"not json", [opcode: :text]}, create_state())
+    assert_stops(%{"action" => "unknown"})
+    assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => valid_id, "event" => "bogus"})
+    assert_stops(%{"action" => "announce", "info_hash" => String.duplicate("x", 19), "peer_id" => valid_id})
+    assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => unicode_id})
+    assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => valid_id, "answer" => %{}})
   end
 
   test "two users join server" do
@@ -217,6 +233,64 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
                }
              }
            } = reply
+  end
+
+  test "honors numwant when relaying offers" do
+    info_hash = make_id()
+    {:ok, {_peer1_id, _reply1, _state1}} = new_peer(1, info_hash, %{offers: []})
+    {:ok, {_peer2_id, _reply2, _state2}} = new_peer(2, info_hash, %{offers: []})
+    assert_receive_nothing(50)
+
+    {:ok, {_peer3_id, _reply3, _state3}} = new_peer(3, info_hash, %{numwant: 1})
+
+    assert %{"action" => "announce", "offer_id" => _offer_id} = receive_json()
+    assert_receive_nothing(50)
+
+    {:ok, {_peer4_id, _reply4, _state4}} = new_peer(4, info_hash, %{numwant: 0})
+    assert_receive_nothing(50)
+  end
+
+  test "duplicate peer id disconnects the old socket" do
+    info_hash = make_id()
+    peer_id = "peer-1______________"
+
+    {:reply, _reply, _state1} =
+      send_message(
+        %{"action" => "announce", "info_hash" => info_hash, "peer_id" => peer_id, "offers" => []},
+        create_state()
+      )
+
+    {:reply, _reply, _state2} =
+      send_message(
+        %{"action" => "announce", "info_hash" => info_hash, "peer_id" => peer_id, "offers" => []},
+        create_state()
+      )
+
+    assert_receive :disconnect
+  end
+
+  test "a peer can participate in multiple torrents and stop one" do
+    info_hash1 = make_id()
+    info_hash2 = make_id()
+    peer_id = "peer-1______________"
+    state = create_state()
+
+    {:reply, _reply, state} =
+      send_message(%{"action" => "announce", "info_hash" => info_hash1, "peer_id" => peer_id, "offers" => []}, state)
+
+    {:reply, _reply, state} =
+      send_message(%{"action" => "announce", "info_hash" => info_hash2, "peer_id" => peer_id, "offers" => []}, state)
+
+    assert %{^info_hash1 => %{"incomplete" => 1}, ^info_hash2 => %{"incomplete" => 1}} = scrape()
+
+    {:ok, _state} =
+      send_message(
+        %{"action" => "announce", "info_hash" => info_hash1, "peer_id" => peer_id, "event" => "stopped"},
+        state
+      )
+
+    assert %{^info_hash2 => %{"incomplete" => 1}} = scrape()
+    refute Map.has_key?(scrape(), info_hash1)
   end
 
   test "completed peers" do

@@ -12,7 +12,6 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     {:ok, %{pubsub_server: pubsub_server}}
   end
 
-
   @impl WebSock
   def handle_in({body, [opcode: opcode]}, state) when opcode in [:text, :binary] do
     with {:ok, %{} = body} <- Phoenix.json_library().decode(body) do
@@ -41,8 +40,11 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   defp handle(%{"action" => "announce"} = message, state) do
-    with 20 <- length(String.to_charlist(message["info_hash"])),
-         20 <- length(String.to_charlist(message["peer_id"])) do
+    with %{"info_hash" => info_hash, "peer_id" => peer_id} <- message,
+         true <- is_binary(info_hash),
+         true <- is_binary(peer_id),
+         20 <- byte_size(info_hash),
+         20 <- byte_size(peer_id) do
       case message["event"] do
         nil ->
           if is_nil(message["answer"]) do
@@ -149,23 +151,24 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     {:reply, reply, state}
   end
 
-  defp send_offers_to_peers(pubsub_server, from, message) do
-    if message["offers"] do
-      topic = message["info_hash"]
-      dispatcher = WebtorrentTrackerWeb.UserSocket
-      {:ok, {adapter, name}} = Registry.meta(pubsub_server, :pubsub)
+  defp send_offers_to_peers(pubsub_server, from, %{"offers" => [_ | _]} = message) do
+    topic = message["info_hash"]
+    dispatcher = WebtorrentTrackerWeb.UserSocket
+    {:ok, {adapter, name}} = Registry.meta(pubsub_server, :pubsub)
 
-      with :ok <- adapter.broadcast(name, topic, message, dispatcher) do
-        Registry.dispatch(pubsub_server, topic, {dispatcher, :dispatch, [from, message]})
-      end
+    with :ok <- adapter.broadcast(name, topic, message, dispatcher) do
+      Registry.dispatch(pubsub_server, topic, {dispatcher, :dispatch, [from, message]})
     end
 
     :ok
   end
 
-  defp process_answer(message, state) do
-    {to_peer_id, reply} = Map.pop(message, "to_peer_id")
-    reply = %{reply | "peer_id" => state.peer_id}
+  defp send_offers_to_peers(_pubsub_server, _from, _message), do: :ok
+
+  defp process_answer(%{"to_peer_id" => to_peer_id} = message, %{peer_id: peer_id} = state)
+       when is_binary(to_peer_id) do
+    {_to_peer_id, reply} = Map.pop(message, "to_peer_id")
+    reply = %{reply | "peer_id" => peer_id}
 
     Phoenix.PubSub.broadcast(
       state.pubsub_server,
@@ -175,6 +178,8 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
     {:noreply, state}
   end
+
+  defp process_answer(_message, state), do: {:stop, state}
 
   defp process_stop(message, state) do
     Phoenix.PubSub.unsubscribe(state.pubsub_server, message["info_hash"])
@@ -187,7 +192,6 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     :ok
   end
 
-
   def dispatch(
         entries,
         from,
@@ -195,15 +199,17 @@ defmodule WebtorrentTrackerWeb.UserSocket do
           "info_hash" => info_hash,
           "peer_id" => peer_id,
           "offers" => offers
-        } = _message
+        } = message
       )
-      when from != :none do
+      when from != :none and is_list(offers) do
     pids =
       for {pid, %{peer_id: peer_id}} <- entries, peer_id != from do
         pid
       end
 
-    for {offer, pid} <- Enum.zip(offers, Enum.take_random(pids, length(offers))) do
+    numwant = offer_count(message, offers)
+
+    for {offer, pid} <- Enum.zip(Enum.take(offers, numwant), Enum.take_random(pids, numwant)) do
       send(
         pid,
         Phoenix.json_library().encode!(%{
@@ -218,4 +224,10 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
     :ok
   end
+
+  defp offer_count(%{"numwant" => numwant}, offers) when is_integer(numwant) and numwant >= 0 do
+    min(numwant, length(offers))
+  end
+
+  defp offer_count(_message, offers), do: length(offers)
 end
