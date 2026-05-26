@@ -41,10 +41,8 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
   defp handle(%{"action" => "announce"} = message, state) do
     with %{"info_hash" => info_hash, "peer_id" => peer_id} <- message,
-         true <- is_binary(info_hash),
-         true <- is_binary(peer_id),
-         20 <- byte_size(info_hash),
-         20 <- byte_size(peer_id) do
+         true <- twenty_char_id?(info_hash),
+         true <- twenty_char_id?(peer_id) do
       case message["event"] do
         nil ->
           if is_nil(message["answer"]) do
@@ -126,7 +124,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   defp scrape_files(%{"info_hash" => info_hash}, pubsub_server) when is_binary(info_hash) do
-    if byte_size(info_hash) == 20 do
+    if twenty_char_id?(info_hash) do
       {:ok, scrape_info_hashes([info_hash], pubsub_server)}
     else
       :error
@@ -134,7 +132,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
   end
 
   defp scrape_files(%{"info_hash" => info_hashes}, pubsub_server) when is_list(info_hashes) do
-    if Enum.all?(info_hashes, &(is_binary(&1) and byte_size(&1) == 20)) do
+    if Enum.all?(info_hashes, &twenty_char_id?/1) do
       {:ok, scrape_info_hashes(info_hashes, pubsub_server)}
     else
       :error
@@ -191,11 +189,12 @@ defmodule WebtorrentTrackerWeb.UserSocket do
          %{"to_peer_id" => to_peer_id, "offer_id" => offer_id, "answer" => answer} = message,
          %{peer_id: peer_id} = state
        )
-       when is_binary(to_peer_id) and byte_size(to_peer_id) == 20 and is_binary(offer_id) do
+       when is_binary(offer_id) do
     {_to_peer_id, reply} = Map.pop(message, "to_peer_id")
     reply = %{reply | "peer_id" => peer_id}
 
-    if valid_answer?(answer) and Registry.count_match(state.pubsub_server, to_peer_id, :_) > 0 do
+    if twenty_char_id?(to_peer_id) and valid_answer?(answer) and
+         Registry.count_match(state.pubsub_server, to_peer_id, :_) > 0 do
       Phoenix.PubSub.broadcast(
         state.pubsub_server,
         to_peer_id,
@@ -263,6 +262,9 @@ defmodule WebtorrentTrackerWeb.UserSocket do
 
   defp valid_answer?(%{"type" => "answer", "sdp" => sdp}) when is_binary(sdp), do: true
   defp valid_answer?(_answer), do: false
+
+  defp twenty_char_id?(value) when is_binary(value), do: length(String.to_charlist(value)) == 20
+  defp twenty_char_id?(_value), do: false
 
   defp complete_status(%{"event" => "completed"}, _state), do: 1
 

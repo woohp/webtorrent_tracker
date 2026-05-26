@@ -2,7 +2,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
   use WebtorrentTrackerWeb.SocketCase
   alias WebtorrentTrackerWeb.UserSocket
 
-  defp make_id(), do: List.to_string(for _ <- 1..20, do: Enum.random(?a..?z))
+  defp make_id(), do: List.to_string(for <<codepoint <- :rand.bytes(20)>>, do: codepoint)
 
   defp make_offer() do
     %{
@@ -92,7 +92,10 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     assert_stops(%{"action" => "unknown"})
     assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => valid_id, "event" => "bogus"})
     assert_stops(%{"action" => "announce", "info_hash" => String.duplicate("x", 19), "peer_id" => valid_id})
-    assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => unicode_id})
+
+    assert {:reply, _reply, _state} =
+             send_message(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => unicode_id}, create_state())
+
     assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => valid_id, "answer" => %{}})
     assert_stops(%{"action" => "scrape", "info_hash" => 123})
     assert_stops(%{"action" => "scrape", "info_hash" => [valid_id, String.duplicate("x", 19)]})
