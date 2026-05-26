@@ -58,6 +58,32 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     assert {:stop, :normal, _state} = UserSocket.handle_in({json_encode!(message), [opcode: :text]}, create_state())
   end
 
+  defp free_port do
+    {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true])
+    {:ok, port} = :inet.port(socket)
+    :ok = :gen_tcp.close(socket)
+    port
+  end
+
+  defp websocket_handshake(port) do
+    {:ok, socket} = :gen_tcp.connect(~c"localhost", port, [:binary, active: false, packet: :raw])
+
+    key = Base.encode64(:crypto.strong_rand_bytes(16))
+
+    request =
+      "GET / HTTP/1.1\r\n" <>
+        "Host: localhost:#{port}\r\n" <>
+        "Connection: Upgrade\r\n" <>
+        "Upgrade: websocket\r\n" <>
+        "Sec-WebSocket-Key: #{key}\r\n" <>
+        "Sec-WebSocket-Version: 13\r\n\r\n"
+
+    :ok = :gen_tcp.send(socket, request)
+    {:ok, response} = :gen_tcp.recv(socket, 0, 1_000)
+    :ok = :gen_tcp.close(socket)
+    response
+  end
+
   test "rejects malformed messages" do
     valid_id = make_id()
     unicode_id = String.duplicate("é", 20)
@@ -68,6 +94,49 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     assert_stops(%{"action" => "announce", "info_hash" => String.duplicate("x", 19), "peer_id" => valid_id})
     assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => unicode_id})
     assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => valid_id, "answer" => %{}})
+    assert_stops(%{"action" => "scrape", "info_hash" => 123})
+    assert_stops(%{"action" => "scrape", "info_hash" => [valid_id, String.duplicate("x", 19)]})
+  end
+
+  test "rejects answers to unknown peers" do
+    info_hash = make_id()
+    {:ok, {_peer_id, _reply, state}} = new_peer(1, info_hash, %{offers: []})
+
+    assert {:stop, :normal, _state} =
+             send_message(
+               %{
+                 "action" => "announce",
+                 "info_hash" => info_hash,
+                 "peer_id" => "peer-1______________",
+                 "to_peer_id" => "unknown_____________",
+                 "offer_id" => "offer-1",
+                 "answer" => %{"type" => "answer", "sdp" => "valid"}
+               },
+               state
+             )
+  end
+
+  test "websocket upgrades work through Bandit" do
+    port = free_port()
+    {:ok, pid} = Bandit.start_link(plug: WebtorrentTrackerWeb.Endpoint, port: port, startup_log: false)
+
+    response = websocket_handshake(port)
+
+    assert response =~ "HTTP/1.1 101"
+    assert response =~ "upgrade: websocket"
+
+    Process.exit(pid, :normal)
+  end
+
+  test "invalid websocket upgrades return 400" do
+    conn =
+      Plug.Test.conn("GET", "/")
+      |> Plug.Conn.put_req_header("upgrade", "websocket")
+      |> WebtorrentTrackerWeb.UserSocketPlug.call([])
+
+    assert conn.halted
+    assert conn.status == 400
+    assert conn.resp_body == "invalid websocket upgrade"
   end
 
   test "two users join server" do
@@ -248,6 +317,29 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
 
     {:ok, {_peer4_id, _reply4, _state4}} = new_peer(4, info_hash, %{numwant: 0})
     assert_receive_nothing(50)
+
+    {:ok, {_peer5_id, _reply5, _state5}} = new_peer(5, info_hash, %{numwant: -1})
+    assert_receive_nothing(50)
+  end
+
+  test "ignores malformed offers" do
+    info_hash = make_id()
+    {:ok, {_peer1_id, _reply1, _state1}} = new_peer(1, info_hash, %{offers: []})
+    assert_receive_nothing(50)
+
+    {:ok, {_peer2_id, _reply2, _state2}} =
+      new_peer(2, info_hash, %{
+        offers: [
+          %{"offer_id" => make_id()},
+          %{"offer" => %{}},
+          %{"offer_id" => "offer-1", "offer" => %{"type" => "offer", "sdp" => "valid"}}
+        ]
+      })
+
+    assert %{"action" => "announce", "offer_id" => _offer_id, "offer" => %{"type" => "offer", "sdp" => "valid"}} =
+             receive_json()
+
+    assert_receive_nothing(50)
   end
 
   test "duplicate peer id disconnects the old socket" do
@@ -325,7 +417,13 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     assert %{^info_hash => %{"complete" => 1, "incomplete" => 2}} = scrape()
 
     # peer2 announces complete
-    send_message(%{action: "announce", event: "completed", info_hash: info_hash, peer_id: peer2_id}, state2)
+    {:reply, _reply, state2} =
+      send_message(%{action: "announce", event: "completed", info_hash: info_hash, peer_id: peer2_id}, state2)
+
+    assert %{^info_hash => %{"complete" => 2, "incomplete" => 1}} = scrape()
+
+    # a later regular announce should not downgrade peer2 to incomplete
+    send_message(%{action: "announce", info_hash: info_hash, peer_id: peer2_id}, state2)
     assert %{^info_hash => %{"complete" => 2, "incomplete" => 1}} = scrape()
   end
 
@@ -340,6 +438,6 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
       state1
     )
 
-    assert map_size(scrape()) == 0
+    assert %{^info_hash => %{"complete" => 0, "incomplete" => 0, "downloaded" => 0}} = scrape(info_hash)
   end
 end
