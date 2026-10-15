@@ -20,8 +20,8 @@ defmodule WebtorrentTracker.MixProject do
 
   defp deps do
     [
-      {:bandit, "~> 1.11"},
-      {:websock_adapter, "~> 0.5.9"}
+      {:bandit, "~> 1.12"},
+      {:websock_adapter, "~> 0.6.0"}
     ]
   end
 end
