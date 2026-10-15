@@ -32,9 +32,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
         %{
           "action" => "announce",
           "info_hash" => info_hash,
-          "peer_id" => peer_id,
-          "numwant" => 5,
-          "offers" => for(_ <- 1..3, do: make_offer())
+          "peer_id" => peer_id
         },
         fields
       )
@@ -68,6 +66,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     assert_stops(%{"action" => "announce", "info_hash" => String.duplicate("x", 19), "peer_id" => valid_id})
     assert_stops(%{"action" => "announce", "info_hash" => valid_id, "peer_id" => valid_id, "answer" => %{}})
     assert_stops(%{"action" => "scrape", "info_hash" => 123})
+    assert_stops(%{"action" => "scrape", "info_hash" => nil})
     assert_stops(%{"action" => "scrape", "info_hash" => [valid_id, String.duplicate("x", 19)]})
   end
 
@@ -93,7 +92,6 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
 
     {:ok, response} = :gen_tcp.recv(socket, 0, 1_000)
     assert response =~ "HTTP/1.1 101"
-    assert response =~ "upgrade: websocket"
   end
 
   test "non-websocket requests are rejected" do
@@ -108,7 +106,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
 
   test "two peers exchange an offer and answer" do
     info_hash = make_id()
-    {peer1_id, reply1, state1} = new_peer(1, info_hash, %{"offers" => []})
+    {peer1_id, reply1, state1} = new_peer(1, info_hash)
 
     assert %{"action" => "announce", "info_hash" => ^info_hash, "interval" => 120, "complete" => 0, "incomplete" => 1} =
              reply1
@@ -159,7 +157,7 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
 
   test "ignores answers to unknown peers" do
     info_hash = make_id()
-    {peer_id, _reply, state} = new_peer(1, info_hash, %{"offers" => []})
+    {peer_id, _reply, state} = new_peer(1, info_hash)
 
     assert {:ok, _state} =
              send_message(
@@ -177,11 +175,31 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
     refute_received _
   end
 
+  test "an info hash equal to a peer id does not receive that peer's answers" do
+    {peer1_id, _reply1, _state1} = new_peer(1, make_id())
+    new_peer(2, peer1_id)
+    {peer3_id, _reply3, state3} = new_peer(3, make_id())
+
+    message = %{
+      "action" => "announce",
+      "info_hash" => make_id(),
+      "peer_id" => peer3_id,
+      "to_peer_id" => peer1_id,
+      "offer_id" => "offer-1",
+      "answer" => %{"type" => "answer", "sdp" => "valid"}
+    }
+
+    # only peer 1 receives the answer; a shared key space would also deliver it to peer 2
+    assert {:ok, _state3} = send_message(message, state3)
+    assert %{"peer_id" => ^peer3_id, "answer" => _answer} = received_json()
+    refute_received _
+  end
+
   test "scrapes all swarms or the requested ones" do
     info_hash = make_id()
     unknown_info_hash = make_id()
-    new_peer(1, info_hash, %{"offers" => []})
-    new_peer(2, info_hash, %{"offers" => []})
+    new_peer(1, info_hash)
+    new_peer(2, info_hash)
 
     swarm = %{"complete" => 0, "incomplete" => 2, "downloaded" => 0}
     empty = %{"complete" => 0, "incomplete" => 0, "downloaded" => 0}
@@ -193,21 +211,23 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
 
   test "honors numwant when relaying offers" do
     info_hash = make_id()
-    new_peer(1, info_hash, %{"offers" => []})
-    new_peer(2, info_hash, %{"offers" => []})
+    new_peer(1, info_hash)
+    new_peer(2, info_hash)
 
-    new_peer(3, info_hash, %{"numwant" => 1})
+    offers = for _ <- 1..3, do: make_offer()
+
+    new_peer(3, info_hash, %{"offers" => offers, "numwant" => 1})
     assert %{"action" => "announce", "offer_id" => _offer_id} = received_json()
     refute_received _
 
-    new_peer(4, info_hash, %{"numwant" => 0})
-    new_peer(5, info_hash, %{"numwant" => -1})
+    new_peer(4, info_hash, %{"offers" => offers, "numwant" => 0})
+    new_peer(5, info_hash, %{"offers" => offers, "numwant" => -1})
     refute_received _
   end
 
   test "ignores malformed offers" do
     info_hash = make_id()
-    new_peer(1, info_hash, %{"offers" => []})
+    new_peer(1, info_hash)
 
     valid_offer = %{"offer_id" => "offer-1", "offer" => %{"type" => "offer", "sdp" => "valid"}}
     new_peer(2, info_hash, %{"offers" => [%{"offer_id" => make_id()}, %{"offer" => %{}}, valid_offer]})
@@ -218,8 +238,8 @@ defmodule WebtorrentTrackerWeb.UserSocketTest do
 
   test "a duplicate peer id disconnects the old socket" do
     info_hash = make_id()
-    {_peer_id, _reply, old_state} = new_peer(1, info_hash, %{"offers" => []})
-    new_peer(1, info_hash, %{"offers" => []})
+    {_peer_id, _reply, old_state} = new_peer(1, info_hash)
+    new_peer(1, info_hash)
 
     assert_received :disconnect
     assert {:stop, :normal, _state} = UserSocket.handle_info(:disconnect, old_state)

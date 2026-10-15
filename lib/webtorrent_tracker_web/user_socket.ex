@@ -105,7 +105,7 @@ defmodule WebtorrentTrackerWeb.UserSocket do
     {:ok, %{state | complete: Map.delete(state.complete, info_hash)}}
   end
 
-  defp scrape_info_hashes(%{"info_hash" => info_hashes}) do
+  defp scrape_info_hashes(%{"info_hash" => info_hashes}) when is_binary(info_hashes) or is_list(info_hashes) do
     info_hashes = List.wrap(info_hashes)
 
     if Enum.all?(info_hashes, &twenty_char_id?/1) do
@@ -114,6 +114,8 @@ defmodule WebtorrentTrackerWeb.UserSocket do
       :error
     end
   end
+
+  defp scrape_info_hashes(%{"info_hash" => _info_hashes}), do: :error
 
   # without info hashes, scrape every swarm
   defp scrape_info_hashes(_message) do
