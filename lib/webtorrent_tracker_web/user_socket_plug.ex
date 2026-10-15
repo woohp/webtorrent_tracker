@@ -8,7 +8,8 @@ defmodule WebtorrentTrackerWeb.UserSocketPlug do
 
   @impl Plug
   def call(%Plug.Conn{method: "GET", request_path: "/"} = conn, _opts) do
-    WebSockAdapter.upgrade(conn, WebtorrentTrackerWeb.UserSocket, [], timeout: 60_000)
+    # the idle timeout must outlast UserSocket's 120s announce interval, or quiet peers drop between announces
+    WebSockAdapter.upgrade(conn, WebtorrentTrackerWeb.UserSocket, [], timeout: :timer.minutes(4))
   rescue
     WebSockAdapter.UpgradeError -> send_resp(conn, 400, "invalid websocket upgrade")
   end

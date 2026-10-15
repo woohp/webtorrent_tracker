@@ -15,12 +15,12 @@ Keep `README.md` to an introduction and essential setup. Keep this guide to onbo
 - Phoenix was removed deliberately; the tracker needs only an HTTP upgrade and a WebSocket handler. Do not reintroduce Phoenix, Phoenix.PubSub, or telemetry plumbing without a concrete need.
 - Swarm membership and peer lookup are two duplicate-key `Registry`s, both local to one node: `WebtorrentTracker.Swarms` (info hash → `%{peer_id, complete}`) and `WebtorrentTracker.Peers` (peer ID → socket). Keep them separate. A shared key space lets a client announce an info hash equal to another peer's ID and receive that peer's answers.
 - Multi-node operation is a non-goal. Clustering would need distributed counts, scrape, and duplicate-peer detection, not just distributed message delivery.
-- Sockets relay pre-encoded JSON to each other as plain binaries, which `handle_info/2` pushes unchanged. `:disconnect` tells a socket that a newer connection with the same peer ID replaced it.
+- Offer recipients are filtered by peer ID, not pid: a replaced socket may still be registered under the same peer ID until it exits.
 
 ## Protocol policy
 
 - IDs (`info_hash`, `peer_id`, `to_peer_id`) are valid when they are exactly 20 **characters**, not bytes. Clients send each raw byte as one character, so non-ASCII bytes arrive as multi-byte UTF-8. Do not "fix" this to `byte_size/1`.
-- Malformed or unknown messages close the socket. An answer to an unknown `to_peer_id` is silently dropped instead: the offering peer may have left before the answer arrived.
+- Malformed or unknown messages close the socket, but malformed individual offers are skipped. An answer to an unknown `to_peer_id` is silently dropped: the offering peer may have left before the answer arrived.
 - Offers are sent at random to other peers in the swarm, filtered by peer ID and capped by `numwant`. An invalid `numwant` sends no offers.
 
 ## Commands
@@ -32,6 +32,6 @@ Keep `README.md` to an introduction and essential setup. Keep this guide to onbo
 
 ## Testing conventions
 
-- Most tests drive `UserSocket` callbacks directly, so every simulated peer is the test process. Relayed messages arrive in its mailbox synchronously: use `assert_received`/`refute_received`, not timeouts or sleeps. Because of this, the socket filters offer recipients by peer ID, not pid.
+- Most tests drive `UserSocket` callbacks directly, so every simulated peer is the test process. Relayed messages arrive in its mailbox synchronously: use `assert_received`/`refute_received`, not timeouts or sleeps.
 - The registries are global, so tests stay synchronous and give each test fresh info hashes from `make_id/0`.
 - The application does not start the HTTP server in tests. Tests that need a real socket start Bandit with `start_supervised!/1` on port 0 and read the port from `ThousandIsland.listener_info/1`.
