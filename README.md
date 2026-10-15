@@ -1,18 +1,12 @@
 # WebtorrentTracker
 
-To start your Phoenix server:
+A WebSocket tracker for [WebTorrent](https://webtorrent.io) clients. It speaks the `bittorrent-tracker` WebSocket protocol (announce, WebRTC offer/answer relay, and scrape) and keeps all swarm state in memory.
 
-  * Install dependencies with `mix deps.get`
-  * Start Phoenix endpoint with `mix phx.server`
+## Running
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+```sh
+mix deps.get
+mix run --no-halt
+```
 
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
-
-## Learn more
-
-  * Official website: https://www.phoenixframework.org/
-  * Guides: https://hexdocs.pm/phoenix/overview.html
-  * Docs: https://hexdocs.pm/phoenix
-  * Forum: https://elixirforum.com/c/phoenix-forum
-  * Source: https://github.com/phoenixframework/phoenix
+The tracker listens on port 4000 (override with `PORT`). Point clients at `ws://localhost:4000`.
